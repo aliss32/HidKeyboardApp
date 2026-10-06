@@ -23,7 +23,6 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Titreşim servisini başlat
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
         val layout = LinearLayout(this).apply {
@@ -51,8 +50,8 @@ class MainActivity : Activity() {
                 setBackgroundColor(Color.parseColor("#333333"))
                 textSize = 18f
                 setOnClickListener { 
-                    vibratePhone() // Titreşim tetikle
-                    sendKey(code)  // Tuşu PC'ye gönder
+                    vibratePhone() 
+                    sendKey(code) 
                 }
             }
             val params = GridLayout.LayoutParams().apply {
@@ -66,7 +65,8 @@ class MainActivity : Activity() {
         layout.addView(grid)
         setContentView(layout)
 
-        initRoot()
+        // Arka planda donanımı dinamik olarak yapılandır
+        Thread { initConfigFSDynamically() }.start()
     }
 
     private fun vibratePhone() {
@@ -82,25 +82,81 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun initRoot() {
+    private fun initConfigFSDynamically() {
         try {
             process = Runtime.getRuntime().exec("su")
             os = DataOutputStream(process!!.outputStream)
             
-            // SELinux kısıtlamalarını kaldır
-            os?.writeBytes("setenforce 0\n")
+            // Çekirdeği okuyup dinamik olarak USB HID yapılandıran Bash Betiği
+            val setupScript = """
+                # SELinux kısıtlamalarını kaldır
+                setenforce 0
+                
+                # UDC (USB Donanım Çipi) adını dinamik olarak bul
+                UDC_NAME=${'$'}(ls /sys/class/udc | head -n 1)
+                
+                # Eğer UDC boşsa kernel ConfigFS desteklemiyor demektir
+                if [ -z "${'$'}UDC_NAME" ]; then
+                    exit 1
+                fi
+                
+                # Android'in varsayılan USB bağlantısını (MTP vb.) zorla durdur
+                setprop sys.usb.config none
+                sleep 1
+                
+                # Yeni bir USB Gadget (Donanım) oluştur
+                GADGET_DIR=/config/usb_gadget/bios_kb
+                mkdir -p ${'$'}GADGET_DIR
+                cd ${'$'}GADGET_DIR
+                
+                # Sahte Klavye Kimliği (Logitech/Generic PC Klavyesi)
+                echo 0x1d6b > idVendor
+                echo 0x0104 > idProduct
+                
+                mkdir -p strings/0x409
+                echo "Android" > strings/0x409/manufacturer
+                echo "BIOS Keyboard" > strings/0x409/product
+                
+                mkdir -p configs/c.1/strings/0x409
+                echo "HID Config" > configs/c.1/strings/0x409/configuration
+                
+                # HID (Klavye) Fonksiyonunu Yarat
+                mkdir -p functions/hid.usb0
+                echo 1 > functions/hid.usb0/protocol
+                echo 1 > functions/hid.usb0/subclass
+                echo 8 > functions/hid.usb0/report_length
+                
+                # Standart Masaüstü Klavyesi Hex Donanım Haritası (Report Descriptor)
+                echo -ne '\x05\x01\x09\x06\xa1\x01\x05\x07\x19\xe0\x29\xe7\x15\x00\x25\x01\x75\x01\x95\x08\x81\x02\x95\x01\x75\x08\x81\x03\x95\x05\x75\x01\x05\x08\x19\x01\x29\x05\x91\x02\x95\x01\x75\x03\x91\x03\x95\x06\x75\x08\x15\x00\x25\x65\x05\x07\x19\x00\x29\x65\x81\x00\xc0' > functions/hid.usb0/report_desc
+                
+                # Konfigürasyonu cihaza bağla
+                ln -s functions/hid.usb0 configs/c.1/
+                
+                # USB'yi aç (Bulunan UDC'yi ata)
+                echo ${'$'}UDC_NAME > UDC
+                
+                # Sürücü iznini ver
+                chmod 666 /dev/hidg0
+            """.trimIndent()
+
+            os?.writeBytes(setupScript + "\n")
+            os?.flush()
             
-            // HATA KONTROLÜ: Kernel düzeyinde USB HID cihazı oluşmuş mu?
-            if (File("/dev/hidg0").exists()) {
-                os?.writeBytes("chmod 666 /dev/hidg0\n")
-                os?.flush()
-                Toast.makeText(this, "BAŞARILI: Root ve HID Sürücüsü Aktif!", Toast.LENGTH_LONG).show()
-            } else {
-                // Eğer bu hatayı görüyorsan, PC telefonu klavye olarak görmüyor demektir.
-                Toast.makeText(this, "HATA: /dev/hidg0 bulunamadı! USB Gadget Tool'dan HID profili açılmamış.", Toast.LENGTH_LONG).show()
+            // Kernel'in yapılandırmayı bitirmesi için 2 saniye bekle
+            Thread.sleep(2000)
+
+            runOnUiThread {
+                if (File("/dev/hidg0").exists()) {
+                    Toast.makeText(this, "BAŞARILI: Çekirdek Yapılandırıldı! Klavye Hazır.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "HATA: Kernel yapılandırılamadı (Kernelinizde HID modülü derlenmemiş olabilir).", Toast.LENGTH_LONG).show()
+                }
             }
+
         } catch (e: Exception) {
-            Toast.makeText(this, "Root Hatası! Cihaz Rootlu Değil.", Toast.LENGTH_LONG).show()
+            runOnUiThread {
+                Toast.makeText(this, "Root Hatası! Cihaz Rootlu Değil.", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -117,6 +173,9 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
+            // Uygulamadan çıkarken telefonu eski haline (Dosya Aktarımı/Şarj moduna) geri döndür
+            os?.writeBytes("setprop sys.usb.config mtp,adb\n")
+            os?.flush()
             os?.close()
             process?.destroy()
         } catch (e: Exception) {
