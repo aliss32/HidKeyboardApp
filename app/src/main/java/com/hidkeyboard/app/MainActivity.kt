@@ -17,20 +17,17 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Ana arayuz duzeni
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#121212")) // Koyu tema
+            setBackgroundColor(Color.parseColor("#121212"))
         }
 
-        // Tuslar icin Grid (Izgara) yapisi
         val grid = GridLayout(this).apply {
             columnCount = 3
             alignmentMode = GridLayout.ALIGN_BOUNDS
         }
 
-        // HID Kullanim Kodlari
         val keys = listOf(
             Pair("ESC", "29"), Pair("F2", "3b"), Pair("DEL", "4c"),
             Pair("F10", "43"), Pair("F12", "45"), Pair("ENTER", "28"),
@@ -38,7 +35,6 @@ class MainActivity : Activity() {
             Pair("SAG", "4f"), Pair("A", "04"), Pair("Y", "1c")
         )
 
-        // Tuslari ekrana ciz
         for ((label, code) in keys) {
             val btn = Button(this).apply {
                 text = label
@@ -63,15 +59,11 @@ class MainActivity : Activity() {
 
     private fun initRoot() {
         try {
-            // Su terminalini baslat ve acik tut
             process = Runtime.getRuntime().exec("su")
             os = DataOutputStream(process!!.outputStream)
-ECHO is off.
-            // Surucu izinlerini zorla ac
             os?.writeBytes("setenforce 0\n")
             os?.writeBytes("chmod 666 /dev/hidg0\n")
             os?.flush()
-ECHO is off.
             Toast.makeText(this, "Root Yetkisi Aktif!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Root Hatasi! Cihaz Rootlu Degil.", Toast.LENGTH_LONG).show()
@@ -80,9 +72,7 @@ ECHO is off.
 
     private fun sendKey(hexCode: String) {
         try {
-            // Tusa basma sinyali
             os?.writeBytes("echo -ne '\\x00\\x00\\x$hexCode\\x00\\x00\\x00\\x00\\x00' ^> /dev/hidg0\n")
-            // Tusu birakma sinyali
             os?.writeBytes("echo -ne '\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' ^> /dev/hidg0\n")
             os?.flush()
         } catch (e: Exception) {
